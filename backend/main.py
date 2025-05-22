@@ -1,11 +1,11 @@
-# backend/main.py
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware # Для разрешения запросов с Frontend
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-import crud, models, schemas, external_fetcher
-from database import SessionLocal, engine
+import crud, models, schemas # Обновленные абсолютные импорты
+from database import SessionLocal, engine # Обновленный абсолютный импорт
+from external_fetcher import fetch_quote_from_programming_quotes_api # Новый импорт для Programming Quotes API
 
 # Создаем таблицы в БД (если их нет).
 # В реальном проекте лучше использовать Alembic для миграций.
@@ -30,92 +30,104 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Разрешенные источники
-    allow_credentials=True, # Разрешить куки
-    allow_methods=["*"],    # Разрешить все методы (GET, POST, PUT, DELETE и т.д.)
-    allow_headers=["*"],    # Разрешить все заголовки
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Разрешить все HTTP методы (GET, POST, PUT, DELETE и т.д.)
+    allow_headers=["*"], # Разрешить все заголовки
 )
 
-# Зависимость для получения сессии БД
-def get_db_session():
+# Dependency to get DB session
+def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-@app.get("/")
-def read_root():
-    return {"message": "Добро пожаловать в API Цитат!"}
+# --- Маршруты для работы с цитатами в собственной базе данных (CRUD) ---
 
 @app.post("/quotes/", response_model=schemas.Quote, summary="Добавить новую цитату", tags=["Quotes"])
-def create_new_quote(quote: schemas.QuoteCreate, db: Session = Depends(get_db_session)):
-    # Проверка, существует ли уже такая цитата от этого автора
-    existing_quote = db.query(models.Quote).filter(models.Quote.text == quote.text, models.Quote.author == quote.author).first()
-    if existing_quote:
-        raise HTTPException(status_code=400, detail="Такая цитата этого автора уже существует")
+def create_quote(quote: schemas.QuoteCreate, db: Session = Depends(get_db)):
+    """
+    Добавляет новую цитату в базу данных.
+    """
     return crud.create_quote(db=db, quote=quote)
 
 @app.get("/quotes/", response_model=List[schemas.Quote], summary="Получить список всех цитат", tags=["Quotes"])
-def read_all_quotes(skip: int = 0, limit: int = 100, db: Session = Depends(get_db_session)):
+def read_quotes(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Возвращает список всех цитат с пагинацией.
+    """
     quotes = crud.get_quotes(db, skip=skip, limit=limit)
     return quotes
 
 @app.get("/quotes/random/", response_model=schemas.Quote, summary="Получить случайную цитату", tags=["Quotes"])
-def read_random_quote(db: Session = Depends(get_db_session)):
+def read_random_quote(db: Session = Depends(get_db)):
+    """
+    Возвращает случайную цитату из базы данных.
+    """
     quote = crud.get_random_quote(db)
     if quote is None:
-        raise HTTPException(status_code=404, detail="Цитаты не найдены")
+        raise HTTPException(status_code=404, detail="Цитаты не найдены в базе данных")
     return quote
 
-@app.get("/quotes/search/", response_model=List[schemas.Quote], summary="Поиск цитат по автору или тексту", tags=["Quotes"])
-def search_existing_quotes(query: str = Query(..., min_length=1, description="Текст для поиска в цитатах или авторах"),
-                           db: Session = Depends(get_db_session)):
-    quotes = crud.search_quotes(db, query=query)
-    if not quotes:
-        # Если в локальной базе не найдено, можно сразу попытаться найти во внешнем источнике
-        # Но это может замедлить ответ. Лучше, если это будет инициировано с фронтенда
-        # или через отдельный эндпоинт /external/fetch
-        pass
-    return quotes
-
 @app.get("/quotes/{quote_id}", response_model=schemas.Quote, summary="Получить цитату по ID", tags=["Quotes"])
-def read_single_quote(quote_id: int, db: Session = Depends(get_db_session)):
+def read_quote(quote_id: int, db: Session = Depends(get_db)):
+    """
+    Возвращает цитату по ее уникальному идентификатору.
+    """
     db_quote = crud.get_quote(db, quote_id=quote_id)
     if db_quote is None:
         raise HTTPException(status_code=404, detail="Цитата не найдена")
     return db_quote
 
-@app.put("/quotes/{quote_id}", response_model=schemas.Quote, summary="Отредактировать цитату", tags=["Quotes"])
-def update_existing_quote(quote_id: int, quote: schemas.QuoteUpdate, db: Session = Depends(get_db_session)):
-    db_quote = crud.update_quote(db, quote_id=quote_id, quote_update=quote)
+@app.put("/quotes/{quote_id}", response_model=schemas.Quote, summary="Обновить цитату по ID", tags=["Quotes"])
+def update_existing_quote(quote_id: int, quote_update: schemas.QuoteUpdate, db: Session = Depends(get_db)):
+    """
+    Обновляет существующую цитату по ее ID.
+    Можно обновить текст или автора.
+    """
+    db_quote = crud.update_quote(db, quote_id=quote_id, quote_update=quote_update)
     if db_quote is None:
         raise HTTPException(status_code=404, detail="Цитата не найдена для обновления")
     return db_quote
 
-@app.delete("/quotes/{quote_id}", response_model=schemas.Quote, summary="Удалить цитату", tags=["Quotes"])
-def delete_existing_quote(quote_id: int, db: Session = Depends(get_db_session)):
+@app.delete("/quotes/{quote_id}", summary="Удалить цитату по ID", tags=["Quotes"])
+def delete_existing_quote(quote_id: int, db: Session = Depends(get_db)):
+    """
+    Удаляет цитату по ее ID.
+    """
     db_quote = crud.delete_quote(db, quote_id=quote_id)
-    if db_quote is None:
+    if db_quote is None: # crud.delete_quote вернет None, если цитаты с таким ID нет
         raise HTTPException(status_code=404, detail="Цитата не найдена для удаления")
-    return db_quote
+    return {"message": "Цитата успешно удалена", "id": quote_id} # Возвращаем сообщение об успехе
+
+@app.get("/quotes/search/", response_model=List[schemas.Quote], summary="Поиск цитат в БД", tags=["Quotes"])
+def search_quotes_in_db(query: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+    """
+    Ищет цитаты в собственной базе данных по тексту или автору.
+    """
+    quotes = crud.search_quotes(db, query=query)
+    if not quotes:
+        raise HTTPException(status_code=404, detail="Цитаты по вашему запросу не найдены в базе данных.")
+    return quotes
+
+# --- Маршрут для получения цитат из внешнего источника ---
 
 @app.get("/external/fetch/", summary="Получить цитату из интернета", tags=["External"])
 async def fetch_quote_from_external(author: Optional[str] = None, query: Optional[str] = None):
     """
-    Ищет цитату во внешнем источнике (например, Quotable API).
+    Ищет цитату во внешнем источнике (Programming Quotes API).
     Если цитата найдена, она возвращается. Frontend может предложить добавить её в базу.
     """
     if not author and not query:
-        # Если ни автор, ни запрос не указаны, получаем случайную цитату из внешнего API
-        fetched_data = external_fetcher.fetch_quote_from_quotable()
-    else:
-        fetched_data = external_fetcher.fetch_quote_from_quotable(author=author, query=query)
+        # Если ни автор, ни запрос не указаны, попробуем получить случайную цитату
+        print("DEBUG: Запрос на внешнюю цитату без автора и запроса. Попытка получить случайную.")
+
+    # Используем новую функцию для Programming Quotes API
+    fetched_data = fetch_quote_from_programming_quotes_api(author=author, query=query)
 
     if fetched_data and fetched_data.get("text") and fetched_data.get("author"):
-        return {"text": fetched_data["text"], "author": fetched_data["author"], "source": "Quotable API"}
+        return {"text": fetched_data["text"], "author": fetched_data["author"], "source": "Programming Quotes API"}
     else:
         raise HTTPException(status_code=404, detail="Цитата не найдена во внешнем источнике.")
-
-# Для запуска: uvicorn backend.main:app --reload
-# Убедитесь, что вы находитесь в папке quote_app/ (на один уровень выше backend/)

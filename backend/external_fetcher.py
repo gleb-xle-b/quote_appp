@@ -1,66 +1,96 @@
 # backend/external_fetcher.py
 import requests
+import random
 
-QUOTABLE_API_URL = "https://api.quotable.io"
+# Новый API для программистских цитат
+PROGRAMMING_QUOTES_API_URL = "https://programming-quotesapi.vercel.app/api"
 
-def fetch_quote_from_quotable(author: str = None, query: str = None):
+def fetch_quote_from_programming_quotes_api(author: str = None, query: str = None):
     """
-    Ищет цитату на Quotable API.
-    Можно искать по автору или по ключевому слову в цитате (query).
+    Ищет цитату на Programming Quotes API.
+    Этот API не поддерживает прямой поиск по автору или тексту через параметры.
+    Придется загрузить все цитаты и отфильтровать их на нашей стороне.
     """
+    print(f"DEBUG: Вызов fetch_quote_from_programming_quotes_api с author='{author}', query='{query}'")
     try:
-        if author:
-            # Поиск случайной цитаты конкретного автора
-            # Quotable API позволяет фильтровать по автору при запросе /quotes?author=...
-            # или /random?author=...
-            response = requests.get(f"{QUOTABLE_API_URL}/random", params={"author": author, "limit": 1})
-            response.raise_for_status() # Проверка на HTTP ошибки
-            data = response.json()
-            if isinstance(data, list) and data: # API может вернуть список, даже если просим одну
-                quote_data = data[0]
-                return {"text": quote_data.get("content"), "author": quote_data.get("author")}
-            elif isinstance(data, dict) and data.get("content"): # Иногда /random возвращает один объект
-                 return {"text": data.get("content"), "author": data.get("author")}
+        # Получаем все цитаты с API
+        response = requests.get(f"{PROGRAMMING_QUOTES_API_URL}/quotes")
+        print(f"DEBUG: Запрос к Programming Quotes API: {response.url}")
+        response.raise_for_status() # Проверка на HTTP ошибки (4xx или 5xx)
 
+        all_quotes = response.json()
+        print(f"DEBUG: Получено {len(all_quotes)} цитат от Programming Quotes API.")
+
+        found_quotes = []
+
+        if author:
+            # Фильтруем по автору
+            search_author_lower = author.lower()
+            for quote_data in all_quotes:
+                if 'author' in quote_data and quote_data['author'].lower() == search_author_lower:
+                    found_quotes.append({"text": quote_data.get("quote"), "author": quote_data.get("author")})
         elif query:
-            # Поиск по ключевому слову
-            response = requests.get(f"{QUOTABLE_API_URL}/search/quotes", params={"query": query, "limit": 1})
-            response.raise_for_status()
-            data = response.json()
-            if data.get("results") and len(data["results"]) > 0:
-                quote_data = data["results"][0]
-                return {"text": quote_data.get("content"), "author": quote_data.get("author")}
+            # Фильтруем по тексту цитаты
+            search_query_lower = query.lower()
+            for quote_data in all_quotes:
+                if 'quote' in quote_data and search_query_lower in quote_data['quote'].lower():
+                    found_quotes.append({"text": quote_data.get("quote"), "author": quote_data.get("author")})
         else:
-            # Получить случайную цитату без параметров
-            response = requests.get(f"{QUOTABLE_API_URL}/random")
-            response.raise_for_status()
-            data = response.json()
-            return {"text": data.get("content"), "author": data.get("author")}
+            # Если нет ни автора, ни запроса, возвращаем случайную из всех
+            if all_quotes:
+                random_quote_data = random.choice(all_quotes)
+                return {"text": random_quote_data.get("quote"), "author": random_quote_data.get("author")}
+            else:
+                print("DEBUG: API вернул пустой список цитат.")
+                return None
+
+        if found_quotes:
+            # Если найдены цитаты, возвращаем случайную из них
+            selected_quote = random.choice(found_quotes)
+            print(f"DEBUG: Найдена и выбрана цитата: '{selected_quote.get('text', '')[:50]}...' - {selected_quote.get('author')}")
+            return selected_quote
+        else:
+            print(f"DEBUG: Цитаты по запросу author='{author}' или query='{query}' не найдены.")
+            return None
 
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching from Quotable: {e}")
+        print(f"ERROR: Ошибка запроса к Programming Quotes API: {e}")
         return None
     except (KeyError, IndexError, TypeError) as e:
-        print(f"Error parsing Quotable API response: {e}")
+        print(f"ERROR: Ошибка парсинга ответа Programming Quotes API: {e}")
         return None
-    return None
+    except Exception as e:
+        print(f"ERROR: Неизвестная ошибка в fetch_quote_from_programming_quotes_api: {e}")
+        return None
 
-
-# Пример использования:
+# Пример использования (для тестирования самого файла)
 if __name__ == "__main__":
-    # Перед запуском этого файла напрямую, убедитесь, что requests установлен:
-    # pip install requests
-    print("Случайная цитата:")
-    random_q = fetch_quote_from_quotable()
+    print("--- Тестирование Programming Quotes API ---")
+
+    print("\nСлучайная цитата (без параметров):")
+    random_q = fetch_quote_from_programming_quotes_api()
     if random_q:
         print(f'"{random_q["text"]}" - {random_q["author"]}')
+    else:
+        print("Цитата не найдена.")
 
-    print("\nЦитата Альберта Эйнштейна:")
-    einstein_q = fetch_quote_from_quotable(author="Albert Einstein")
-    if einstein_q:
-        print(f'"{einstein_q["text"]}" - {einstein_q["author"]}')
+    print("\nЦитата по автору 'Linus Torvalds':")
+    linus_q = fetch_quote_from_programming_quotes_api(author="Linus Torvalds")
+    if linus_q:
+        print(f'"{linus_q["text"]}" - {linus_q["author"]}')
+    else:
+        print("Цитата по автору не найдена.")
 
-    print("\nЦитата со словом 'life':")
-    life_q = fetch_quote_from_quotable(query="life")
-    if life_q:
-        print(f'"{life_q["text"]}" - {life_q["author"]}')
+    print("\nЦитата по запросу 'code':")
+    code_q = fetch_quote_from_programming_quotes_api(query="code")
+    if code_q:
+        print(f'"{code_q["text"]}" - {code_q["author"]}')
+    else:
+        print("Цитата по запросу не найдена.")
+
+    print("\nЦитата по автору 'NonExistent Author':")
+    no_author_q = fetch_quote_from_programming_quotes_api(author="NonExistent Author")
+    if no_author_q:
+        print(f'"{no_author_q["text"]}" - {no_author_q["author"]}')
+    else:
+        print("Цитата по несуществующему автору не найдена (ожидаемо).")
