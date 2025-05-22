@@ -1,20 +1,17 @@
-// frontend/src/App.jsx
-import React, { useState, useEffect, useCallback } from 'react'; // <--- УБЕДИТЬСЯ, ЧТО React импортирован
-import { Container, Row, Col, Button, Navbar, Form, FormControl, Alert, Spinner } from 'react-bootstrap';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Container, Row, Col, Button, Navbar, Form, FormControl, Alert } from 'react-bootstrap';
 import QuoteCard from './components/QuoteCard';
 import QuoteForm from './components/QuoteForm';
 import * as api from './api';
-import './App.css';
 
 function App() {
     const [quotes, setQuotes] = useState([]);
     const [randomQuote, setRandomQuote] = useState(null);
-    const [editingQuote, setEditingQuote] = useState(null);
+    const [editingQuote, setEditingQuote] = useState(null); // Для редактирования
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
-    const [showForm, setShowForm] = useState(false);
-    const [externalQuoteSuggestion, setExternalQuoteSuggestion] = useState(null);
+    const [showForm, setShowForm] = useState(false); // Показать/скрыть форму добавления
 
     const fetchAllQuotes = useCallback(async () => {
         setIsLoading(true);
@@ -33,14 +30,13 @@ function App() {
     const fetchRandomQuote = useCallback(async () => {
         setIsLoading(true);
         setError('');
-        setRandomQuote(null);
         try {
             const data = await api.getRandomQuote();
             setRandomQuote(data);
         } catch (err) {
             setError('Не удалось загрузить случайную цитату.');
             console.error(err);
-            setRandomQuote(null);
+            setRandomQuote(null); // Сброс, если не удалось загрузить
         } finally {
             setIsLoading(false);
         }
@@ -48,115 +44,80 @@ function App() {
 
     useEffect(() => {
         fetchAllQuotes();
-        fetchRandomQuote();
+        fetchRandomQuote(); // Загружаем случайную цитату при первом рендере
     }, [fetchAllQuotes, fetchRandomQuote]);
 
-    const handleSearch = async (e) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError('');
-        setQuotes([]);
-        setEditingQuote(null);
-        setShowForm(false);
-        setExternalQuoteSuggestion(null);
-
-        try {
-            const data = await api.searchQuotes(searchTerm);
-            setQuotes(data);
-        } catch (err) {
-            setError('Не удалось выполнить поиск цитат.');
-            console.error(err);
-        } finally {
-            setIsLoading(false);
+    const handleFormSubmit = (newQuote) => {
+        // Если цитата была отредактирована, обновим ее в списке
+        if (editingQuote) {
+            setQuotes(prevQuotes => prevQuotes.map(q => q.id === newQuote.id ? newQuote : q));
+        } else {
+            // Иначе, это новая цитата, добавляем ее в начало списка
+            setQuotes(prevQuotes => [newQuote, ...prevQuotes]);
         }
-    };
-
-    const handleFormSubmit = async (quoteData) => {
-        setIsLoading(true);
-        setError('');
-        try {
-            if (editingQuote) {
-                await api.updateQuote(editingQuote.id, quoteData);
-                setEditingQuote(null);
-            } else {
-                await api.addQuote(quoteData);
-                setShowForm(false);
-            }
-            await fetchAllQuotes();
-            await fetchRandomQuote();
-        } catch (err) {
-            setError(err.response?.data?.detail || 'Ошибка при сохранении цитаты.');
-            console.error(err);
-        } finally {
-            setIsLoading(false);
-        }
+        setShowForm(false); // Скрыть форму после добавления/редактирования
+        setEditingQuote(null); // Сбросить редактируемую цитату
+        fetchRandomQuote(); // Обновить случайную цитату
     };
 
     const handleEdit = (quote) => {
         setEditingQuote(quote);
-        setShowForm(true);
-        setExternalQuoteSuggestion(null);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setShowForm(true); // Показать форму для редактирования
     };
 
     const handleCancelEdit = () => {
         setEditingQuote(null);
         setShowForm(false);
-        setError('');
     };
 
     const handleDelete = async (id) => {
-        setIsLoading(true);
         setError('');
         try {
             await api.deleteQuote(id);
-            await fetchAllQuotes();
-            if (randomQuote && randomQuote.id === id) {
-                setRandomQuote(null);
-                await fetchRandomQuote();
-            }
+            setQuotes(prevQuotes => prevQuotes.filter(quote => quote.id !== id));
+            fetchRandomQuote(); // Обновить случайную цитату
         } catch (err) {
             setError('Не удалось удалить цитату.');
             console.error(err);
-        } finally {
-            setIsLoading(false);
         }
     };
 
-    const handleAddFromExternal = async (quote) => {
+    const handleSearch = async (e) => {
+        e.preventDefault();
         setError('');
-        try {
-            setExternalQuoteSuggestion(null);
-            setEditingQuote(null);
-            setShowForm(true);
-            await handleFormSubmit(quote);
-            alert('Цитата успешно добавлена!');
-        } catch (err) {
-            setError(err.response?.data?.detail || 'Ошибка при добавлении внешней цитаты.');
-            console.error(err);
-        }
-    };
-
-    const fetchRandomExternalQuote = async () => {
         setIsLoading(true);
-        setError('');
-        setExternalQuoteSuggestion(null);
+        setRandomQuote(null); // Сбросить случайную цитату при поиске
         try {
-            const data = await api.fetchExternalQuote();
-            setExternalQuoteSuggestion(data);
+            const data = await api.searchQuotes(searchTerm);
+            setQuotes(data);
         } catch (err) {
-            setError(err.message || 'Не удалось загрузить случайную внешнюю цитату.');
+            setError(`Не удалось найти цитаты: ${err.response?.data?.detail || 'Неизвестная ошибка'}`);
+            setQuotes([]); // Очистить список при ошибке поиска
             console.error(err);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleClearSearch = () => {
+        setSearchTerm('');
+        fetchAllQuotes(); // Загрузить все цитаты снова
     };
 
     return (
         <>
             <Navbar bg="dark" variant="dark" expand="lg" className="mb-4">
-                <Container>
-                    <Navbar.Brand href="#">Цитатник</Navbar.Brand>
+                <Container fluid>
+                    <Navbar.Brand href="#">
+                        <img
+                            src="http://www.w3.org/2000/svg"
+                            width="30"
+                            height="30"
+                            className="d-inline-block align-top me-2" // me-2 для отступа справа
+                            alt="Логотип Цитатника"
+                        />
+                        Менеджер Цитат
+                    </Navbar.Brand>
                     <Navbar.Toggle aria-controls="basic-navbar-nav" />
                     <Navbar.Collapse id="basic-navbar-nav">
                         <Form className="d-flex ms-auto" onSubmit={handleSearch}>
@@ -169,80 +130,68 @@ function App() {
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                             <Button variant="outline-success" type="submit">Поиск</Button>
+                            {searchTerm && (
+                                <Button variant="outline-secondary" onClick={handleClearSearch} className="ms-2">
+                                    Очистить
+                                </Button>
+                            )}
                         </Form>
                     </Navbar.Collapse>
                 </Container>
             </Navbar>
 
             <Container>
-                {error && <Alert variant="danger">{error}</Alert>}
-                {isLoading && (
-                    <div className="text-center my-3">
-                        <Spinner animation="border" role="status">
-                            <span className="visually-hidden">Загрузка...</span>
-                        </Spinner>
-                        <p>Загрузка данных...</p>
-                    </div>
-                )}
-
-                <Row className="mb-4">
-                    <Col>
-                        <h1>Управление цитатами</h1>
-                        <Button variant="primary" onClick={() => {
-                            setShowForm(!showForm);
-                            setEditingQuote(null);
-                            setExternalQuoteSuggestion(null);
-                            setError('');
-                        }}>
-                            {showForm ? 'Скрыть форму' : 'Добавить новую цитату'}
-                        </Button>
-                        <Button variant="info" className="ms-2" onClick={fetchRandomExternalQuote}>
-                            Получить случайную внешнюю цитату
-                        </Button>
-                    </Col>
-                </Row>
-
-                {externalQuoteSuggestion && (
+                {error && (
                     <Row className="mb-4">
                         <Col>
-                            <Alert variant="info" className="d-flex align-items-center justify-content-between">
-                                <div>
-                                    <h5 className="mb-1">Предложение из интернета:</h5>
-                                    <p className="mb-0">"<i>{externalQuoteSuggestion.text}</i>" - {externalQuoteSuggestion.author}</p>
-                                </div>
-                                <Button
-                                    variant="success"
-                                    onClick={() => handleAddFromExternal(externalQuoteSuggestion)}
-                                >
-                                    Добавить в мою базу
-                                </Button>
-                            </Alert>
+                            <Alert variant="danger">{error}</Alert>
                         </Col>
                     </Row>
                 )}
 
+                {/* Новый блок для кнопок "Добавить" и "Обновить случайную" */}
+                <Row className="mb-4 d-flex justify-content-center">
+                    <Col xs={12} md={6} lg={4} className="d-flex justify-content-around">
+                        <Button
+                            onClick={() => setShowForm(!showForm)}
+                            className="me-2"
+                            variant="primary"
+                            size="sm"
+                        >
+                            {showForm ? 'Скрыть форму' : 'Добавить новую цитату'}
+                        </Button>
+                        <Button
+                            onClick={fetchRandomQuote}
+                            variant="primary"
+                            size="sm"
+                            disabled={isLoading}
+                        >
+                            {isLoading ? 'Обновление...' : 'Обновить случайную цитату'}
+                        </Button>
+                    </Col>
+                </Row>
 
+
+                {/* Блок со случайной цитатой из вашей БД */}
                 <Row className="mb-4">
                     <Col>
-                        <h2>Случайная цитата</h2>
+                        <h2>Случайная цитата из вашей базы</h2>
                         {isLoading && !randomQuote && <p>Загрузка случайной цитаты...</p>}
-                        {!isLoading && !randomQuote && <p>Не удалось загрузить случайную цитату. Добавьте цитаты, чтобы получить случайную!</p>}
-                        {randomQuote && (
+                        {randomQuote ? (
                             <QuoteCard
                                 quote={randomQuote}
                                 onEdit={handleEdit}
                                 onDelete={handleDelete}
                             />
+                        ) : (
+                            !isLoading && <p>Не удалось загрузить случайную цитату. Попробуйте еще раз.</p>
                         )}
-                        <Button variant="secondary" onClick={fetchRandomQuote} className="mt-2">
-                            Обновить случайную цитату
-                        </Button>
                     </Col>
                 </Row>
 
 
                 {(showForm || editingQuote) && (
-                    <Row className="mb-4">
+                     <Row className="mb-4">
                         <Col>
                             <QuoteForm
                                 existingQuote={editingQuote}

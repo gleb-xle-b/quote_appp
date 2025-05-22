@@ -1,3 +1,4 @@
+# backend/main.py
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware # Для разрешения запросов с Frontend
 from sqlalchemy.orm import Session
@@ -5,7 +6,6 @@ from typing import List, Optional
 
 import crud, models, schemas # Обновленные абсолютные импорты
 from database import SessionLocal, engine # Обновленный абсолютный импорт
-from external_fetcher import fetch_quote_from_programming_quotes_api # Новый импорт для Programming Quotes API
 
 # Создаем таблицы в БД (если их нет).
 # В реальном проекте лучше использовать Alembic для миграций.
@@ -98,7 +98,7 @@ def delete_existing_quote(quote_id: int, db: Session = Depends(get_db)):
     Удаляет цитату по ее ID.
     """
     db_quote = crud.delete_quote(db, quote_id=quote_id)
-    if db_quote is None: # crud.delete_quote вернет None, если цитаты с таким ID нет
+    if db_quote is None:
         raise HTTPException(status_code=404, detail="Цитата не найдена для удаления")
     return {"message": "Цитата успешно удалена", "id": quote_id} # Возвращаем сообщение об успехе
 
@@ -111,23 +111,3 @@ def search_quotes_in_db(query: str = Query(..., min_length=1), db: Session = Dep
     if not quotes:
         raise HTTPException(status_code=404, detail="Цитаты по вашему запросу не найдены в базе данных.")
     return quotes
-
-# --- Маршрут для получения цитат из внешнего источника ---
-
-@app.get("/external/fetch/", summary="Получить цитату из интернета", tags=["External"])
-async def fetch_quote_from_external(author: Optional[str] = None, query: Optional[str] = None):
-    """
-    Ищет цитату во внешнем источнике (Programming Quotes API).
-    Если цитата найдена, она возвращается. Frontend может предложить добавить её в базу.
-    """
-    if not author and not query:
-        # Если ни автор, ни запрос не указаны, попробуем получить случайную цитату
-        print("DEBUG: Запрос на внешнюю цитату без автора и запроса. Попытка получить случайную.")
-
-    # Используем новую функцию для Programming Quotes API
-    fetched_data = fetch_quote_from_programming_quotes_api(author=author, query=query)
-
-    if fetched_data and fetched_data.get("text") and fetched_data.get("author"):
-        return {"text": fetched_data["text"], "author": fetched_data["author"], "source": "Programming Quotes API"}
-    else:
-        raise HTTPException(status_code=404, detail="Цитата не найдена во внешнем источнике.")
